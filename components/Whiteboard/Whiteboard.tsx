@@ -326,6 +326,22 @@ const Whiteboard: React.FC<WhiteboardProps> = ({
     const ERASER_RADIUS = 10; // px
     const idsToDelete: string[] = [];
 
+    if (currentDrawingIdRef.current && currentPathRef.current.length > 0) {
+      const hitCurrent = currentPathRef.current.some((p) => {
+        const dist = Math.sqrt(Math.pow(p.x - x, 2) + Math.pow(p.y - y, 2));
+        return dist <= ERASER_RADIUS;
+      });
+      if (hitCurrent) {
+        cancelCurrentDrawingRef.current = true;
+        setIsDrawing(false);
+        currentPathRef.current = [];
+        const idToRemove = currentDrawingIdRef.current;
+        currentDrawingIdRef.current = null;
+        setDrawings((prev) => prev.filter((d) => d.id !== idToRemove));
+        return;
+      }
+    }
+
     drawingsRef.current.forEach(drawing => {
       // Simple bounding box check first (optimization)
       // skipping for now, direct point check
