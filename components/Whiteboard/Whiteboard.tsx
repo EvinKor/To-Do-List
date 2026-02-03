@@ -17,7 +17,6 @@ interface WhiteboardProps {
   setNotes: React.Dispatch<React.SetStateAction<WhiteboardNote[]>>;
   userId: string;
   isOffline?: boolean;
-  onOpenHandDraw?: () => void;
 }
 
 type ToolType = 'select' | 'hand' | 'note' | 'text' | 'image' | 'pen' | 'eraser';
@@ -60,8 +59,7 @@ const Whiteboard: React.FC<WhiteboardProps> = ({
   notes,
   setNotes,
   userId,
-  isOffline,
-  onOpenHandDraw
+  isOffline
 }) => {
   const saveTimers = useRef<Record<string, number>>({});
 
@@ -1375,16 +1373,6 @@ const Whiteboard: React.FC<WhiteboardProps> = ({
           </div>
 
           <div className="absolute bottom-6 right-4 md:right-6 flex flex-col gap-3 z-50">
-            <div className="flex flex-col bg-white/90 dark:bg-slate-900/90 backdrop-blur-md shadow-xl rounded-2xl border border-slate-100 dark:border-slate-800 overflow-hidden">
-              <button
-                onClick={onOpenHandDraw}
-                className="p-3 hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-600 dark:text-slate-300 transition-colors"
-                title="Open Hand Draw"
-              >
-                <span className="material-symbols-outlined text-[20px]">draw</span>
-              </button>
-            </div>
-
             {/* Zoom Controls */}
             <div className="flex flex-col bg-white/90 dark:bg-slate-900/90 backdrop-blur-md shadow-xl rounded-2xl border border-slate-100 dark:border-slate-800 overflow-hidden">
               <button onClick={() => handleZoom(0.1)} className="p-3 hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-600 dark:text-slate-300 transition-colors">

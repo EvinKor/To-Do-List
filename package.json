@@ -13,7 +13,6 @@
     "canvas-confetti": "1.9.2",
     "react": "^19.2.3",
     "react-dom": "^19.2.3",
-    "react-icons": "^5.5.0",
     "react-router-dom": "^7.12.0",
     "uuid": "^13.0.0"
   },

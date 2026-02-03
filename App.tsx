@@ -1,7 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import TaskListView from './TaskListView';
 import Whiteboard from './components/Whiteboard/Whiteboard';
-import HandDrawView from './handdrawView';
 import LoginPage from './components/Auth/LoginPage';
 import { Task, WhiteboardNote } from './hooks/types';
 import { supabase } from './lib/supabase';
@@ -80,7 +79,7 @@ const seedNotes: WhiteboardNote[] = [
 ];
 
 const views = ['tasks', 'whiteboard'] as const;
-type View = 'tasks' | 'whiteboard' | 'handdraw';
+type View = 'tasks' | 'whiteboard';
 
 export default function App() {
   const [isDarkMode, setIsDarkMode] = useState(false);
@@ -378,19 +377,14 @@ export default function App() {
               userId={userId || ''}
             />
           </div>
-        ) : activeView === 'whiteboard' ? (
+        ) : (
           <Whiteboard
             toggleTheme={toggleTheme}
             isDarkMode={isDarkMode}
             notes={notes}
             setNotes={setNotes}
             userId={userId}
-            onOpenHandDraw={() => setActiveView('handdraw')}
           />
-        ) : (
-          <div className="mx-auto max-w-6xl w-full px-4 pb-12 pt-4">
-            <HandDrawView />
-          </div>
         )}
       </main>
     </div>
