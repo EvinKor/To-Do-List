@@ -21,7 +21,7 @@ const TaskListView: React.FC<TaskListViewProps> = ({ toggleTheme, tasks, onToggl
     const [selectedDateForNewTask, setSelectedDateForNewTask] = useState<Date | undefined>(undefined);
     const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(new Set());
     const [draggedTaskId, setDraggedTaskId] = useState<string | null>(null);
-    const [numColumns, setNumColumns] = useState(3);
+    const [numColumns, setNumColumns] = useState(2);
 
     // Filter State
     const [isFilterOpen, setIsFilterOpen] = useState(false);
@@ -42,7 +42,7 @@ const TaskListView: React.FC<TaskListViewProps> = ({ toggleTheme, tasks, onToggl
         const updateColumns = () => {
             if (window.innerWidth < 768) setNumColumns(1);
             else if (window.innerWidth < 1280) setNumColumns(2);
-            else setNumColumns(3);
+            else setNumColumns(2);
         };
 
         updateColumns();
