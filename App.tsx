@@ -294,7 +294,7 @@ export default function App() {
   };
 
   return (
-    <div className={`h-screen flex flex-col bg-background-light dark:bg-background-dark text-slate-900 dark:text-slate-50 overflow-hidden`}>
+    <div className={`h-screen flex flex-col bg-background-light dark:bg-background-dark text-slate-900 dark:text-slate-50`}>
       <header className="sticky top-0 z-20 bg-white/70 dark:bg-[#0f172a]/70 backdrop-blur-xl border-b border-slate-200/50 dark:border-slate-800/50 transition-all duration-300">
         <div className="mx-auto w-full max-w-[1440px] px-6 h-20 flex items-center justify-between gap-8">
           {/* Logo & Branding */}
@@ -363,7 +363,7 @@ export default function App() {
         </div>
       </header>
 
-      <main className="flex-1 w-full overflow-hidden flex flex-col">
+      <main className="flex-1 w-full flex flex-col">
         {activeView === 'tasks' ? (
           <div className="mx-auto max-w-6xl w-full px-4 pb-12 pt-4">
             <TaskListView
