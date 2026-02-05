@@ -1,7 +1,7 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import QRCode from 'qrcode';
 import { WhiteboardNote } from '@/src/hooks/types';
-import { supabase } from '@/src/lib/supabase';
+import { redirectToLogin } from '@/src/lib/auth';
 
 // ✅ Use a real UUID for the whiteboard too
 const WHITEBOARD_ID = 'a1111111-b222-c333-d444-e55555555555';
@@ -67,8 +67,43 @@ const Whiteboard: React.FC<WhiteboardProps> = ({
   allowShare
 }) => {
   const saveTimers = useRef<Record<string, number>>({});
-  const effectiveWhiteboardId = whiteboardId ?? WHITEBOARD_ID;
+  const [effectiveWhiteboardId, setEffectiveWhiteboardId] = useState<string>(
+    whiteboardId ?? WHITEBOARD_ID
+  );
   const canShare = allowShare !== false;
+  const apiBase =
+    ((import.meta as any).env?.VITE_API_BASE_URL as string) ||
+    ((import.meta as any).env?.VITE_PUBLIC_BASE_URL as string) ||
+    window.location.origin;
+  const apiToken = (import.meta as any).env?.VITE_API_TOKEN as string | undefined;
+
+  const apiFetch = useCallback(
+    async (path: string, options: RequestInit = {}) => {
+      const headers: Record<string, string> = {
+        "Content-Type": "application/json",
+        ...(options.headers as Record<string, string> | undefined),
+      };
+      if (apiToken) headers.Authorization = `Bearer ${apiToken}`;
+
+      const res = await fetch(`${apiBase.replace(/\/$/, "")}${path}`, {
+        ...options,
+        headers,
+        credentials: "include",
+      });
+
+      // change to login page
+      const text = await res.text();
+      if (res.status === 401) {
+        redirectToLogin();
+        return null;
+      }
+      if (!res.ok) {
+        throw new Error(text || `API error ${res.status}`);
+      }
+      return text ? JSON.parse(text) : null;
+    },
+    [apiBase]
+  );
 
   // ✅ Prevent notes upsert before whiteboard exists (FK fix)
   const [whiteboardReady, setWhiteboardReady] = useState(false);
@@ -79,7 +114,6 @@ const Whiteboard: React.FC<WhiteboardProps> = ({
   const toDbRow = (n: WhiteboardNote) => ({
     // NOTE: This assumes whiteboard_notes.id is UUID
     id: n.id,
-    user_id: userId, // must be UUID
     whiteboard_id: effectiveWhiteboardId, // must exist in whiteboards
 
     type: n.type,
@@ -116,29 +150,49 @@ const Whiteboard: React.FC<WhiteboardProps> = ({
     // console.log('Upserting Note:', note.id);
     const row = toDbRow(note);
 
-    const { error } = await supabase
-      .from('whiteboard_notes')
-      .upsert(row, { onConflict: 'id' });
-
-    if (error) {
-      console.error('upsertNote error:', error, row);
-    } else {
-      console.log('Upsert Success:', note.id);
-    }
-  };
+      try {
+        await apiFetch(`/api/whiteboard-notes/${note.id}`, {
+          method: 'PUT',
+          body: JSON.stringify(row),
+        });
+        console.log('Upsert Success:', note.id);
+      } catch (error) {
+        console.error('upsertNote error:', error, row);
+      }
+    };
 
   const deleteNoteFromDb = async (id: string) => {
     if (isOffline) return;
     if (!userId) return;
     if (!whiteboardReady) return;
 
-    const { error } = await supabase.from('whiteboard_notes').delete().eq('id', id);
-    if (error) console.error('Error deleting note:', error);
-  };
+      try {
+        await apiFetch(`/api/whiteboard-notes/${id}`, { method: 'DELETE' });
+      } catch (error) {
+        console.error('Error deleting note:', error);
+      }
+    };
 
   // ----------------------------
   // Ensure Whiteboard Exists (FK prerequisite)
   // ----------------------------
+  useEffect(() => {
+    if (whiteboardId) {
+      setEffectiveWhiteboardId(whiteboardId);
+      return;
+    }
+    if (!userId) return;
+    // Fetch user's whiteboard id from API
+    apiFetch(`/api/whiteboards?user_id=${userId}`, { method: 'GET' })
+      .then((result) => {
+        const first = result?.boards?.[0];
+        if (first?.id) setEffectiveWhiteboardId(first.id);
+      })
+      .catch((error) => {
+        console.error('Error fetching user whiteboards:', error);
+      });
+  }, [whiteboardId, userId, apiFetch]);
+
   useEffect(() => {
     const ensureWhiteboardExists = async () => {
       console.log('Ensure Whiteboard: Starting check', { userId, isOffline });
@@ -153,36 +207,35 @@ const Whiteboard: React.FC<WhiteboardProps> = ({
 
       setWhiteboardReady(false);
 
-      const { data, error } = await supabase
-        .from('whiteboards')
-        .select('id')
-        .eq('id', effectiveWhiteboardId)
-        .maybeSingle();
-
-      if (error) {
+      let board = null;
+      try {
+        const result = await apiFetch(`/api/whiteboards/${effectiveWhiteboardId}`, {
+          method: 'GET',
+        });
+        board = result?.board ?? null;
+      } catch (error) {
         console.error('whiteboards select error:', error);
         return;
       }
 
-      if (!data) {
+      if (!board) {
         console.log('Whiteboard missing, creating...', effectiveWhiteboardId);
 
-        const { error: insertError } = await supabase
-          .from('whiteboards')
-          .insert({
-            id: effectiveWhiteboardId,
-            title: 'My Whiteboard',
-            user_id: userId
+        try {
+          await apiFetch('/api/whiteboards', {
+            method: 'POST',
+            body: JSON.stringify({
+              id: effectiveWhiteboardId,
+              title: 'My Whiteboard',
+            }),
           });
-
-        if (insertError) {
-          console.error('Failed to create whiteboard:', insertError);
+          console.log('Whiteboard created successfully');
+        } catch (error) {
+          console.error('Failed to create whiteboard:', error);
           return;
         }
-
-        console.log('Whiteboard created successfully');
       } else {
-        console.log('Whiteboard exists found:', data);
+        console.log('Whiteboard exists found:', board);
       }
 
       console.log('Whiteboard Ready: TRUE');
@@ -190,7 +243,7 @@ const Whiteboard: React.FC<WhiteboardProps> = ({
     };
 
     ensureWhiteboardExists();
-  }, [userId, isOffline]);
+  }, [userId, isOffline, apiFetch, effectiveWhiteboardId]);
 
   // ----------------------------
   // Fetch Notes on Load
@@ -218,17 +271,11 @@ const Whiteboard: React.FC<WhiteboardProps> = ({
       if (!userId || !whiteboardReady) return;
 
       console.log('Fetching Notes...');
-      const { data, error } = await supabase
-        .from('whiteboard_notes')
-        .select('*')
-        .eq('whiteboard_id', effectiveWhiteboardId);
-
-      if (error) {
-        console.error('Error fetching notes:', error);
-        return;
-      }
-
-      if (data) {
+      try {
+        const result = await apiFetch(`/api/whiteboard-notes?whiteboard_id=${effectiveWhiteboardId}`, {
+          method: 'GET',
+        });
+        const data = result?.notes ?? [];
         console.log('Notes Fetched:', data.length);
         if (data.length > 0) {
           console.log('Sample Note Data:', data[0]);
@@ -241,63 +288,13 @@ const Whiteboard: React.FC<WhiteboardProps> = ({
         highestZIndex.current = maxZ;
 
         setNotes(mappedNotes);
+      } catch (error) {
+        console.error('Error fetching notes:', error);
       }
     };
 
     fetchNotes();
-  }, [userId, whiteboardReady, isOffline, setNotes, mapDbNote, effectiveWhiteboardId]);
-
-  // ----------------------------
-  // Realtime Sync (Notes + Drawings)
-  // ----------------------------
-  useEffect(() => {
-    if (isOffline) return;
-    if (!effectiveWhiteboardId) return;
-
-    const channel = supabase
-      .channel(`whiteboard-${effectiveWhiteboardId}`)
-      .on(
-        'postgres_changes',
-        { event: '*', schema: 'public', table: 'whiteboard_notes', filter: `whiteboard_id=eq.${effectiveWhiteboardId}` },
-        (payload) => {
-          if (payload.eventType === 'DELETE') {
-            setNotes((prev) => prev.filter((n) => n.id !== (payload.old as any).id));
-          } else {
-            const next = mapDbNote(payload.new);
-            setNotes((prev) => {
-              const idx = prev.findIndex((n) => n.id === next.id);
-              if (idx === -1) return [...prev, next];
-              const updated = [...prev];
-              updated[idx] = next;
-              return updated;
-            });
-          }
-        }
-      )
-      .on(
-        'postgres_changes',
-        { event: '*', schema: 'public', table: 'whiteboard_drawings', filter: `whiteboard_id=eq.${effectiveWhiteboardId}` },
-        (payload) => {
-          if (payload.eventType === 'DELETE') {
-            setDrawings((prev) => prev.filter((d) => d.id !== (payload.old as any).id));
-          } else {
-            const next = payload.new as any;
-            setDrawings((prev) => {
-              const idx = prev.findIndex((d) => d.id === next.id);
-              if (idx === -1) return [...prev, next];
-              const updated = [...prev];
-              updated[idx] = next;
-              return updated;
-            });
-          }
-        }
-      )
-      .subscribe();
-
-    return () => {
-      supabase.removeChannel(channel);
-    };
-  }, [effectiveWhiteboardId, isOffline, mapDbNote, setNotes]);
+  }, [userId, whiteboardReady, isOffline, setNotes, mapDbNote, effectiveWhiteboardId, apiFetch]);
 
   // ----------------------------
   // Debounced Autosave
@@ -343,19 +340,18 @@ const Whiteboard: React.FC<WhiteboardProps> = ({
   useEffect(() => {
     const fetchDrawings = async () => {
       if (!userId) return;
-      const { data, error } = await supabase
-        .from('whiteboard_drawings')
-        .select('*')
-        .eq('whiteboard_id', effectiveWhiteboardId);
-
-      if (error) {
-        console.error('Error fetching drawings:', error);
-      } else if (data) {
+      try {
+        const result = await apiFetch(`/api/whiteboard-drawings?whiteboard_id=${effectiveWhiteboardId}`, {
+          method: 'GET',
+        });
+        const data = result?.drawings ?? [];
         setDrawings(data);
+      } catch (error) {
+        console.error('Error fetching drawings:', error);
       }
     };
     fetchDrawings();
-  }, [userId]);
+  }, [userId, apiFetch, effectiveWhiteboardId]);
 
   const saveDrawing = async (id: string, points: { x: number; y: number }[]) => {
     if (!userId || points.length < 2) return;
@@ -367,8 +363,14 @@ const Whiteboard: React.FC<WhiteboardProps> = ({
       path_points: points,
       color: penColor
     };
-    const { error } = await supabase.from('whiteboard_drawings').upsert(newDrawing, { onConflict: 'id' });
-    if (error) console.error('Error saving drawing:', error);
+    try {
+      await apiFetch(`/api/whiteboard-drawings/${id}`, {
+        method: 'PUT',
+        body: JSON.stringify(newDrawing),
+      });
+    } catch (error) {
+      console.error('Error saving drawing:', error);
+    }
   };
 
   const deleteDrawing = async (id: string) => {
@@ -376,8 +378,11 @@ const Whiteboard: React.FC<WhiteboardProps> = ({
     setDrawings(prev => prev.filter(d => d.id !== id));
 
     // DB Update
-    const { error } = await supabase.from('whiteboard_drawings').delete().eq('id', id);
-    if (error) console.error('Error deleting drawing:', error);
+    try {
+      await apiFetch(`/api/whiteboard-drawings/${id}`, { method: 'DELETE' });
+    } catch (error) {
+      console.error('Error deleting drawing:', error);
+    }
   };
 
   const checkEraserCollision = (x: number, y: number) => {
@@ -446,23 +451,21 @@ const Whiteboard: React.FC<WhiteboardProps> = ({
     setShareError(null);
     try {
       const baseUrl = (import.meta as any).env?.VITE_PUBLIC_BASE_URL || 'http://localhost:3000';
-      const { data: existing, error: selectError } = await supabase
-        .from('whiteboard_shares')
-        .select('id')
-        .eq('whiteboard_id', effectiveWhiteboardId)
-        .maybeSingle();
+      const existing = await apiFetch(
+        `/api/whiteboard-shares?whiteboard_id=${effectiveWhiteboardId}`,
+        { method: 'GET' }
+      );
 
-      if (selectError) throw selectError;
-
-      let shareId = existing?.id;
+      let shareId = existing?.shares?.[0]?.id;
       if (!shareId) {
         shareId = crypto.randomUUID();
-        const { error: insertError } = await supabase.from('whiteboard_shares').insert({
-          id: shareId,
-          whiteboard_id: effectiveWhiteboardId,
-          created_by: userId
+        await apiFetch('/api/whiteboard-shares', {
+          method: 'POST',
+          body: JSON.stringify({
+            id: shareId,
+            whiteboard_id: effectiveWhiteboardId,
+          }),
         });
-        if (insertError) throw insertError;
       }
 
       const url = `${baseUrl.replace(/\/$/, '')}/share/${shareId}`;

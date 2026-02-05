@@ -321,34 +321,402 @@ async function getAppointments(env, clinicId) {
 }
 __name(getAppointments, "getAppointments");
 
-// claudeflare/supabase/whiteboardNotes.js
-async function upsertWhiteboardNote(env, row) {
-  const baseUrl = env.SUPABASE_URL?.replace(/\/$/, "");
-  if (!baseUrl) {
-    throw new Error("Missing SUPABASE_URL");
-  }
+// claudeflare/supabase/whiteboard.js
+function baseUrl(env) {
+  const url = env.SUPABASE_URL?.replace(/\/$/, "");
+  if (!url) throw new Error("Missing SUPABASE_URL");
+  return url;
+}
+__name(baseUrl, "baseUrl");
+function sbHeaders2(env) {
   if (!env.SUPABASE_SERVICE_ROLE_KEY) {
     throw new Error("Missing SUPABASE_SERVICE_ROLE_KEY");
   }
-  const url = `${baseUrl}/rest/v1/whiteboard_notes?on_conflict=id`;
+  return {
+    apikey: env.SUPABASE_SERVICE_ROLE_KEY,
+    Authorization: `Bearer ${env.SUPABASE_SERVICE_ROLE_KEY}`,
+    "Content-Type": "application/json"
+  };
+}
+__name(sbHeaders2, "sbHeaders");
+async function sbFetch2(env, url, options = {}) {
   const res = await fetch(url, {
-    method: "POST",
+    ...options,
     headers: {
-      "Content-Type": "application/json",
-      apikey: env.SUPABASE_SERVICE_ROLE_KEY,
-      Authorization: `Bearer ${env.SUPABASE_SERVICE_ROLE_KEY}`,
-      Prefer: "resolution=merge-duplicates,return=representation"
-    },
-    body: JSON.stringify(row)
+      ...sbHeaders2(env),
+      ...options.headers || {}
+    }
   });
   const text = await res.text();
   if (!res.ok) {
     throw new Error(text || `Supabase error ${res.status}`);
   }
-  const data = text ? JSON.parse(text) : null;
-  return Array.isArray(data) ? data[0] : data;
+  return text ? JSON.parse(text) : null;
 }
-__name(upsertWhiteboardNote, "upsertWhiteboardNote");
+__name(sbFetch2, "sbFetch");
+function json(body, status = 200, headers = {}) {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: { "Content-Type": "application/json", ...headers }
+  });
+}
+__name(json, "json");
+function parseId(pathname) {
+  const parts = pathname.split("/").filter(Boolean);
+  return parts[parts.length - 1] || null;
+}
+__name(parseId, "parseId");
+async function handleWhiteboardApi({
+  request,
+  env,
+  corsHeaders,
+  getTokenFromRequest,
+  decodeAndValidateToken,
+  getProfileByEmail: getProfileByEmail2
+}) {
+  const url = new URL(request.url);
+  const pathname = url.pathname;
+  const isBoards = pathname.startsWith("/api/whiteboards/") || pathname.startsWith("/whiteboards/");
+  const isBoardsList = pathname === "/api/whiteboards" || pathname === "/whiteboards";
+  const isNotes = pathname.startsWith("/api/whiteboard-notes/") || pathname.startsWith("/whiteboard-notes/");
+  const isNotesList = pathname === "/api/whiteboard-notes" || pathname === "/whiteboard-notes";
+  const isDrawings = pathname.startsWith("/api/whiteboard-drawings/") || pathname.startsWith("/whiteboard-drawings/");
+  const isDrawingsList = pathname === "/api/whiteboard-drawings" || pathname === "/whiteboard-drawings";
+  const isShares = pathname.startsWith("/api/whiteboard-shares/") || pathname.startsWith("/whiteboard-shares/");
+  const isSharesList = pathname === "/api/whiteboard-shares" || pathname === "/whiteboard-shares";
+  if (!(isBoards || isBoardsList || isNotes || isNotesList || isDrawings || isDrawingsList || isShares || isSharesList)) {
+    return null;
+  }
+  const token = getTokenFromRequest(request);
+  if (!token) return json({ error: "Unauthorized" }, 401, corsHeaders);
+  const decoded = decodeAndValidateToken(token);
+  if (!decoded.ok) {
+    return json({ error: "Unauthorized" }, 401, corsHeaders);
+  }
+  const profile = await getProfileByEmail2(env, decoded.email);
+  if (!profile) return json({ error: "User not found" }, 403, corsHeaders);
+  const supabaseBase = baseUrl(env);
+  const getOrCreateBoardId = /* @__PURE__ */ __name(async () => {
+    const listUrl = `${supabaseBase}/rest/v1/whiteboards?select=*&user_id=eq.${encodeURIComponent(profile.user_id)}&order=created_at.asc&limit=1`;
+    const boards = await sbFetch2(env, listUrl, { method: "GET" });
+    const existing = Array.isArray(boards) ? boards[0] : null;
+    if (existing?.id) return existing.id;
+    const newId = crypto.randomUUID();
+    const row = {
+      id: newId,
+      user_id: profile.user_id,
+      title: "My Whiteboard",
+      canvas_orientation: "landscape",
+      canvas_width: 1920,
+      canvas_height: 1080,
+      created_at: (/* @__PURE__ */ new Date()).toISOString(),
+      updated_at: (/* @__PURE__ */ new Date()).toISOString()
+    };
+    const createUrl = `${supabaseBase}/rest/v1/whiteboards`;
+    const created = await sbFetch2(env, createUrl, {
+      method: "POST",
+      headers: { Prefer: "return=representation" },
+      body: JSON.stringify(row)
+    });
+    const createdRow = Array.isArray(created) ? created[0] : created;
+    return createdRow?.id ?? newId;
+  }, "getOrCreateBoardId");
+  if (isBoardsList && request.method === "GET") {
+    const boardId = await getOrCreateBoardId();
+    const boardsUrl = `${supabaseBase}/rest/v1/whiteboards?id=eq.${encodeURIComponent(boardId)}&select=*`;
+    const board = await sbFetch2(env, boardsUrl, { method: "GET" });
+    return json({ ok: true, boards: Array.isArray(board) ? board : [board] }, 200, corsHeaders);
+  }
+  if (isBoards && request.method === "GET") {
+    const boardId = await getOrCreateBoardId();
+    const boardsUrl = `${supabaseBase}/rest/v1/whiteboards?id=eq.${encodeURIComponent(boardId)}&select=*`;
+    const board = await sbFetch2(env, boardsUrl, { method: "GET" });
+    return json({ ok: true, board: Array.isArray(board) ? board[0] : board }, 200, corsHeaders);
+  }
+  if (isBoardsList && request.method === "POST") {
+    const boardId = await getOrCreateBoardId();
+    const boardsUrl = `${supabaseBase}/rest/v1/whiteboards?id=eq.${encodeURIComponent(boardId)}&select=*`;
+    const board = await sbFetch2(env, boardsUrl, { method: "GET" });
+    return json({ ok: true, board: Array.isArray(board) ? board[0] : board }, 200, corsHeaders);
+  }
+  if (isNotesList && request.method === "GET") {
+    const whiteboardId = await getOrCreateBoardId();
+    const notesUrl = `${supabaseBase}/rest/v1/whiteboard_notes?select=*&whiteboard_id=eq.${encodeURIComponent(whiteboardId)}`;
+    const notes = await sbFetch2(env, notesUrl, { method: "GET" });
+    return json({ ok: true, notes }, 200, corsHeaders);
+  }
+  if (isNotes && request.method === "PUT") {
+    const id = parseId(pathname);
+    if (!id) return json({ error: "Missing note id" }, 400, corsHeaders);
+    let body;
+    try {
+      body = await request.json();
+    } catch {
+      return json({ error: "Invalid JSON" }, 400, corsHeaders);
+    }
+    if (!body.type) {
+      return json({ error: "Missing type" }, 400, corsHeaders);
+    }
+    const row = {
+      id,
+      whiteboard_id: await getOrCreateBoardId(),
+      user_id: profile.user_id,
+      type: body.type,
+      x: body.x ?? 0,
+      y: body.y ?? 0,
+      width: body.width ?? 256,
+      height: body.height ?? 256,
+      rotation: body.rotation ?? 0,
+      z_index: body.z_index ?? 1,
+      title: body.title ?? null,
+      content: body.content ?? null,
+      color: body.color ?? "yellow",
+      font_size: body.font_size ?? 16,
+      image_url: body.image_url ?? null,
+      updated_at: (/* @__PURE__ */ new Date()).toISOString()
+    };
+    const notesUrl = `${supabaseBase}/rest/v1/whiteboard_notes?on_conflict=id`;
+    const saved = await sbFetch2(env, notesUrl, {
+      method: "POST",
+      headers: { Prefer: "resolution=merge-duplicates,return=representation" },
+      body: JSON.stringify(row)
+    });
+    return json({ ok: true, note: Array.isArray(saved) ? saved[0] : saved }, 200, corsHeaders);
+  }
+  if (isNotes && request.method === "DELETE") {
+    const id = parseId(pathname);
+    if (!id) return json({ error: "Missing note id" }, 400, corsHeaders);
+    const notesUrl = `${supabaseBase}/rest/v1/whiteboard_notes?id=eq.${encodeURIComponent(id)}`;
+    await sbFetch2(env, notesUrl, { method: "DELETE" });
+    return json({ ok: true }, 200, corsHeaders);
+  }
+  if (isDrawingsList && request.method === "GET") {
+    const whiteboardId = await getOrCreateBoardId();
+    const drawingsUrl = `${supabaseBase}/rest/v1/whiteboard_drawings?select=*&whiteboard_id=eq.${encodeURIComponent(whiteboardId)}`;
+    const drawings = await sbFetch2(env, drawingsUrl, { method: "GET" });
+    return json({ ok: true, drawings }, 200, corsHeaders);
+  }
+  if (isDrawings && request.method === "PUT") {
+    const id = parseId(pathname);
+    if (!id) return json({ error: "Missing drawing id" }, 400, corsHeaders);
+    let body;
+    try {
+      body = await request.json();
+    } catch {
+      return json({ error: "Invalid JSON" }, 400, corsHeaders);
+    }
+    if (!body.path_points) {
+      return json({ error: "Missing path_points" }, 400, corsHeaders);
+    }
+    const row = {
+      id,
+      whiteboard_id: await getOrCreateBoardId(),
+      user_id: profile.user_id,
+      path_points: body.path_points,
+      color: body.color ?? "black",
+      updated_at: (/* @__PURE__ */ new Date()).toISOString()
+    };
+    const drawingsUrl = `${supabaseBase}/rest/v1/whiteboard_drawings?on_conflict=id`;
+    const saved = await sbFetch2(env, drawingsUrl, {
+      method: "POST",
+      headers: { Prefer: "resolution=merge-duplicates,return=representation" },
+      body: JSON.stringify(row)
+    });
+    return json({ ok: true, drawing: Array.isArray(saved) ? saved[0] : saved }, 200, corsHeaders);
+  }
+  if (isDrawings && request.method === "DELETE") {
+    const id = parseId(pathname);
+    if (!id) return json({ error: "Missing drawing id" }, 400, corsHeaders);
+    const drawingsUrl = `${supabaseBase}/rest/v1/whiteboard_drawings?id=eq.${encodeURIComponent(id)}`;
+    await sbFetch2(env, drawingsUrl, { method: "DELETE" });
+    return json({ ok: true }, 200, corsHeaders);
+  }
+  if (isSharesList && request.method === "GET") {
+    const whiteboardId = await getOrCreateBoardId();
+    const sharesUrl = `${supabaseBase}/rest/v1/whiteboard_shares?select=*&whiteboard_id=eq.${encodeURIComponent(whiteboardId)}`;
+    const shares = await sbFetch2(env, sharesUrl, { method: "GET" });
+    return json({ ok: true, shares }, 200, corsHeaders);
+  }
+  if (isSharesList && request.method === "POST") {
+    let body;
+    try {
+      body = await request.json();
+    } catch {
+      return json({ error: "Invalid JSON" }, 400, corsHeaders);
+    }
+    if (!body.id) {
+      return json({ error: "Missing id" }, 400, corsHeaders);
+    }
+    const row = {
+      id: body.id,
+      whiteboard_id: await getOrCreateBoardId(),
+      created_by: profile.user_id,
+      created_at: (/* @__PURE__ */ new Date()).toISOString()
+    };
+    const sharesUrl = `${supabaseBase}/rest/v1/whiteboard_shares`;
+    const saved = await sbFetch2(env, sharesUrl, {
+      method: "POST",
+      headers: { Prefer: "return=representation" },
+      body: JSON.stringify(row)
+    });
+    return json({ ok: true, share: Array.isArray(saved) ? saved[0] : saved }, 200, corsHeaders);
+  }
+  if (isShares && request.method === "GET") {
+    const id = parseId(pathname);
+    if (!id) return json({ error: "Missing share id" }, 400, corsHeaders);
+    const sharesUrl = `${supabaseBase}/rest/v1/whiteboard_shares?id=eq.${encodeURIComponent(id)}&select=*`;
+    const share = await sbFetch2(env, sharesUrl, { method: "GET" });
+    return json({ ok: true, share: Array.isArray(share) ? share[0] : share }, 200, corsHeaders);
+  }
+  return json({ error: "Not found" }, 404, corsHeaders);
+}
+__name(handleWhiteboardApi, "handleWhiteboardApi");
+
+// claudeflare/supabase/tasks.js
+function baseUrl2(env) {
+  const url = env.SUPABASE_URL?.replace(/\/$/, "");
+  if (!url) throw new Error("Missing SUPABASE_URL");
+  return url;
+}
+__name(baseUrl2, "baseUrl");
+function sbHeaders3(env) {
+  if (!env.SUPABASE_SERVICE_ROLE_KEY) {
+    throw new Error("Missing SUPABASE_SERVICE_ROLE_KEY");
+  }
+  return {
+    apikey: env.SUPABASE_SERVICE_ROLE_KEY,
+    Authorization: `Bearer ${env.SUPABASE_SERVICE_ROLE_KEY}`,
+    "Content-Type": "application/json"
+  };
+}
+__name(sbHeaders3, "sbHeaders");
+async function sbFetch3(env, url, options = {}) {
+  const res = await fetch(url, {
+    ...options,
+    headers: {
+      ...sbHeaders3(env),
+      ...options.headers || {}
+    }
+  });
+  const text = await res.text();
+  if (!res.ok) {
+    throw new Error(text || `Supabase error ${res.status}`);
+  }
+  return text ? JSON.parse(text) : null;
+}
+__name(sbFetch3, "sbFetch");
+function json2(body, status = 200, headers = {}) {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: { "Content-Type": "application/json", ...headers }
+  });
+}
+__name(json2, "json");
+function parseId2(pathname) {
+  const parts = pathname.split("/").filter(Boolean);
+  return parts[parts.length - 1] || null;
+}
+__name(parseId2, "parseId");
+async function handleTasksApi({
+  request,
+  env,
+  corsHeaders,
+  getTokenFromRequest,
+  decodeAndValidateToken,
+  getProfileByEmail: getProfileByEmail2
+}) {
+  const url = new URL(request.url);
+  const pathname = url.pathname;
+  const isTasks = pathname.startsWith("/api/tasks/") || pathname.startsWith("/tasks/");
+  const isTasksList = pathname === "/api/tasks" || pathname === "/tasks";
+  if (!(isTasks || isTasksList)) return null;
+  const token = getTokenFromRequest(request);
+  if (!token) return json2({ error: "Unauthorized" }, 401, corsHeaders);
+  const decoded = decodeAndValidateToken(token);
+  if (!decoded.ok) return json2({ error: "Unauthorized" }, 401, corsHeaders);
+  const profile = await getProfileByEmail2(env, decoded.email);
+  if (!profile) return json2({ error: "User not found" }, 403, corsHeaders);
+  const supabaseBase = baseUrl2(env);
+  const userId = profile.user_id;
+  if (isTasksList && request.method === "GET") {
+    const queryUserId = url.searchParams.get("user_id") || userId;
+    const tasksUrl = `${supabaseBase}/rest/v1/tasks?select=*&user_id=eq.${encodeURIComponent(queryUserId)}&order=date.asc`;
+    const tasks = await sbFetch3(env, tasksUrl, { method: "GET" });
+    return json2({ ok: true, tasks }, 200, corsHeaders);
+  }
+  if (isTasksList && request.method === "POST") {
+    let body;
+    try {
+      body = await request.json();
+    } catch {
+      return json2({ error: "Invalid JSON" }, 400, corsHeaders);
+    }
+    if (!body.title || !body.type || !body.date || !body.color || !body.urgency) {
+      return json2({ error: "Missing required fields" }, 400, corsHeaders);
+    }
+    const row = {
+      id: body.id,
+      user_id: userId,
+      title: body.title,
+      category: body.category || "Deep Work",
+      type: body.type,
+      color: body.color,
+      urgency: body.urgency,
+      date: body.date,
+      time: body.time ?? null,
+      duration: body.duration ?? "1h",
+      status: body.status ?? "todo",
+      progress: body.progress ?? 0,
+      updated_at: (/* @__PURE__ */ new Date()).toISOString()
+    };
+    const tasksUrl = `${supabaseBase}/rest/v1/tasks`;
+    const saved = await sbFetch3(env, tasksUrl, {
+      method: "POST",
+      headers: { Prefer: "return=representation" },
+      body: JSON.stringify(row)
+    });
+    return json2({ ok: true, task: Array.isArray(saved) ? saved[0] : saved }, 200, corsHeaders);
+  }
+  if (isTasks && request.method === "PUT") {
+    const id = parseId2(pathname);
+    if (!id) return json2({ error: "Missing task id" }, 400, corsHeaders);
+    let body;
+    try {
+      body = await request.json();
+    } catch {
+      return json2({ error: "Invalid JSON" }, 400, corsHeaders);
+    }
+    const row = {
+      title: body.title,
+      category: body.category,
+      type: body.type,
+      color: body.color,
+      urgency: body.urgency,
+      date: body.date,
+      time: body.time ?? null,
+      duration: body.duration,
+      status: body.status,
+      progress: body.progress,
+      updated_at: (/* @__PURE__ */ new Date()).toISOString()
+    };
+    const tasksUrl = `${supabaseBase}/rest/v1/tasks?id=eq.${encodeURIComponent(id)}`;
+    const saved = await sbFetch3(env, tasksUrl, {
+      method: "PATCH",
+      headers: { Prefer: "return=representation" },
+      body: JSON.stringify(row)
+    });
+    return json2({ ok: true, task: Array.isArray(saved) ? saved[0] : saved }, 200, corsHeaders);
+  }
+  if (isTasks && request.method === "DELETE") {
+    const id = parseId2(pathname);
+    if (!id) return json2({ error: "Missing task id" }, 400, corsHeaders);
+    const tasksUrl = `${supabaseBase}/rest/v1/tasks?id=eq.${encodeURIComponent(id)}`;
+    await sbFetch3(env, tasksUrl, { method: "DELETE" });
+    return json2({ ok: true }, 200, corsHeaders);
+  }
+  return json2({ error: "Not found" }, 404, corsHeaders);
+}
+__name(handleTasksApi, "handleTasksApi");
 
 // claudeflare/index.js
 var claudeflare_default = {
@@ -698,60 +1066,24 @@ var claudeflare_default = {
         }
       });
     }
-    if ((url.pathname.startsWith("/api/whiteboard-notes/") || url.pathname.startsWith("/whiteboard-notes/")) && request.method === "PUT") {
-      const token = getTokenFromRequest(request);
-      if (!token) return new Response("Unauthorized", { status: 401, headers: corsHeaders });
-      const decoded = decodeAndValidateToken(token);
-      if (!decoded.ok) {
-        return new Response("Unauthorized", {
-          status: 401,
-          headers: {
-            ...decoded.error === "expired" ? { "Set-Cookie": buildClearCookie() } : {},
-            ...corsHeaders
-          }
-        });
-      }
-      const noteId = url.pathname.split("/").pop();
-      let body;
-      try {
-        body = await request.json();
-      } catch {
-        return new Response("Invalid JSON", { status: 400, headers: corsHeaders });
-      }
-      const profile = await getProfileByEmail(env, decoded.email);
-      if (!profile) return new Response("User not found", { status: 403, headers: corsHeaders });
-      const row = {
-        id: noteId,
-        whiteboard_id: body.whiteboard_id,
-        user_id: profile.user_id,
-        // ✅ server controlled
-        type: body.type,
-        x: body.x ?? 0,
-        y: body.y ?? 0,
-        width: body.width ?? 256,
-        height: body.height ?? 256,
-        rotation: body.rotation ?? 0,
-        z_index: body.z_index ?? 1,
-        title: body.title ?? null,
-        content: body.content ?? null,
-        color: body.color ?? "yellow",
-        font_size: body.font_size ?? 16,
-        image_url: body.image_url ?? null,
-        updated_at: (/* @__PURE__ */ new Date()).toISOString()
-      };
-      try {
-        const saved = await upsertWhiteboardNote(env, row);
-        return new Response(JSON.stringify({ ok: true, note: saved }), {
-          status: 200,
-          headers: { "Content-Type": "application/json", ...corsHeaders }
-        });
-      } catch (e) {
-        return new Response(JSON.stringify({ error: e.message }), {
-          status: 500,
-          headers: { "Content-Type": "application/json", ...corsHeaders }
-        });
-      }
-    }
+    const whiteboardResponse = await handleWhiteboardApi({
+      request,
+      env,
+      corsHeaders,
+      getTokenFromRequest,
+      decodeAndValidateToken,
+      getProfileByEmail
+    });
+    if (whiteboardResponse) return whiteboardResponse;
+    const tasksResponse = await handleTasksApi({
+      request,
+      env,
+      corsHeaders,
+      getTokenFromRequest,
+      decodeAndValidateToken,
+      getProfileByEmail
+    });
+    if (tasksResponse) return tasksResponse;
     return new Response("SSO Gateway Active", {
       status: 200,
       headers: corsHeaders
@@ -800,7 +1132,7 @@ var jsonError = /* @__PURE__ */ __name(async (request, env, _ctx, middlewareCtx)
 }, "jsonError");
 var middleware_miniflare3_json_error_default = jsonError;
 
-// .wrangler/tmp/bundle-KyEPof/middleware-insertion-facade.js
+// .wrangler/tmp/bundle-xwPh9C/middleware-insertion-facade.js
 var __INTERNAL_WRANGLER_MIDDLEWARE__ = [
   middleware_ensure_req_body_drained_default,
   middleware_miniflare3_json_error_default
@@ -832,7 +1164,7 @@ function __facade_invoke__(request, env, ctx, dispatch, finalMiddleware) {
 }
 __name(__facade_invoke__, "__facade_invoke__");
 
-// .wrangler/tmp/bundle-KyEPof/middleware-loader.entry.ts
+// .wrangler/tmp/bundle-xwPh9C/middleware-loader.entry.ts
 var __Facade_ScheduledController__ = class ___Facade_ScheduledController__ {
   constructor(scheduledTime, cron, noRetry) {
     this.scheduledTime = scheduledTime;

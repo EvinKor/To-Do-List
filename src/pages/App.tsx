@@ -2,9 +2,9 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { Routes, Route, useParams } from 'react-router-dom';
 import TaskListView from './TaskListView';
 import Whiteboard from '../components/Whiteboard/Whiteboard';
-import LoginPage from '../components/Auth/LoginPage';
 import { Task, WhiteboardNote } from '../hooks/types';
 import { supabase } from '../lib/supabase';
+import { redirectToLogin } from '../lib/auth';
 import { v4 as uuidv4 } from 'uuid';
 
 // Seed data to showcase the views without a backend
@@ -96,20 +96,20 @@ function MainApp() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    // Check active session
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      setUserId(session?.user.id ?? null);
-      setLoading(false);
-    });
+    const loadUserId = async () => {
+      try {
+        const result = await apiFetch('/api/verify-token', { method: 'GET' });
+        const uid = result?.user?.profiles?.user?.user_id || null;
+        setUserId(uid);
+      } catch (error) {
+        console.error('Failed to load user profile:', error);
+        setUserId(null);
+      } finally {
+        setLoading(false);
+      }
+    };
 
-    const {
-      data: { subscription },
-    } = supabase.auth.onAuthStateChange((_event, session) => {
-      setUserId(session?.user.id ?? null);
-      setLoading(false);
-    });
-
-    return () => subscription.unsubscribe();
+    loadUserId();
   }, []);
 
   // Initialize theme from storage/system
@@ -132,6 +132,34 @@ function MainApp() {
 
   const toggleTheme = () => setIsDarkMode((v) => !v);
 
+  const apiBase =
+    ((import.meta as any).env?.VITE_API_BASE_URL as string) ||
+    ((import.meta as any).env?.VITE_PUBLIC_BASE_URL as string) ||
+    window.location.origin;
+  const apiToken = (import.meta as any).env?.VITE_API_TOKEN as string | undefined;
+
+  const apiFetch = async (path: string, options: RequestInit = {}) => {
+    const headers: Record<string, string> = {
+      "Content-Type": "application/json",
+      ...(options.headers as Record<string, string> | undefined),
+    };
+    if (apiToken) headers.Authorization = `Bearer ${apiToken}`;
+
+    const res = await fetch(`${apiBase.replace(/\/$/, "")}${path}`, {
+      ...options,
+      headers,
+      credentials: "include",
+    });
+
+    const text = await res.text();
+    if (res.status === 401) {
+      redirectToLogin();
+      return null;
+    }
+    if (!res.ok) throw new Error(text || `API error ${res.status}`);
+    return text ? JSON.parse(text) : null;
+  };
+
   // Handlers moved to bottom
 
 
@@ -145,18 +173,9 @@ function MainApp() {
       console.log('fetchTasks: Triggered', { userId });
       if (!userId) return;
 
-      const { data, error } = await supabase
-        .from('tasks')
-        .select('*')
-        .eq('user_id', userId)
-        .order('date', { ascending: true });
-
-      if (error) {
-        console.error('Error fetching tasks:', error);
-        return;
-      }
-
-      if (data) {
+      try {
+        const result = await apiFetch(`/api/tasks?user_id=${userId}`, { method: 'GET' });
+        const data = result?.tasks ?? [];
         console.log('fetchTasks: Data received', data.length);
         const mappedTasks: Task[] = data.map((t: any) => ({
           id: t.id,
@@ -172,6 +191,8 @@ function MainApp() {
           progress: t.progress || 0
         }));
         setTasks(mappedTasks);
+      } catch (error) {
+        console.error('Error fetching tasks:', error);
       }
     };
 
@@ -189,7 +210,11 @@ function MainApp() {
   }
 
   if (!userId) {
-    return <LoginPage onLoginSuccess={() => { }} />;
+    return (
+      <div className="h-screen flex items-center justify-center bg-slate-50 dark:bg-slate-900">
+        <div className="text-sm text-red-500">VITE_APP_USER_ID is not set.</div>
+      </div>
+    );
   }
 
   // 3. Handlers
@@ -200,22 +225,24 @@ function MainApp() {
     // Optimistic UI update
     setTasks((prev) => [...prev, task]);
 
-    const { error } = await supabase.from('tasks').insert({
-      id: task.id,
-      // list_id removed per new schema
-      user_id: userId,
-      title: task.title,
-      category: task.category || 'Deep Work', // Required field
-      date: task.date,
-      time: task.time,
-      status: task.status,
-      type: task.type,
-      urgency: task.urgency,
-      color: task.color,
-      duration: task.duration || '1h'
-    });
-
-    if (error) {
+    try {
+      await apiFetch('/api/tasks', {
+        method: 'POST',
+        body: JSON.stringify({
+          id: task.id,
+          title: task.title,
+          category: task.category || 'Deep Work',
+          date: task.date,
+          time: task.time,
+          status: task.status,
+          type: task.type,
+          urgency: task.urgency,
+          color: task.color,
+          duration: task.duration || '1h',
+          progress: task.progress || 0,
+        }),
+      });
+    } catch (error) {
       console.error('Error adding task:', error);
     }
   };
@@ -225,19 +252,25 @@ function MainApp() {
 
     setTasks((prev) => prev.map((t) => (t.id === updated.id ? updated : t)));
 
-    const { error } = await supabase.from('tasks').update({
-      title: updated.title,
-      category: updated.category,
-      date: updated.date,
-      time: updated.time,
-      status: updated.status,
-      type: updated.type,
-      urgency: updated.urgency,
-      color: updated.color,
-      duration: updated.duration
-    }).eq('id', updated.id);
-
-    if (error) console.error('Error updating task:', error);
+    try {
+      await apiFetch(`/api/tasks/${updated.id}`, {
+        method: 'PUT',
+        body: JSON.stringify({
+          title: updated.title,
+          category: updated.category,
+          date: updated.date,
+          time: updated.time,
+          status: updated.status,
+          type: updated.type,
+          urgency: updated.urgency,
+          color: updated.color,
+          duration: updated.duration,
+          progress: updated.progress,
+        }),
+      });
+    } catch (error) {
+      console.error('Error updating task:', error);
+    }
   };
 
   const handleDeleteTask = async (taskId: string) => {
@@ -245,8 +278,11 @@ function MainApp() {
 
     setTasks((prev) => prev.filter((t) => t.id !== taskId));
 
-    const { error } = await supabase.from('tasks').delete().eq('id', taskId);
-    if (error) console.error('Error deleting task:', error);
+    try {
+      await apiFetch(`/api/tasks/${taskId}`, { method: 'DELETE' });
+    } catch (error) {
+      console.error('Error deleting task:', error);
+    }
   };
 
   const handleToggleTaskStatus = async (taskId: string) => {
@@ -259,11 +295,14 @@ function MainApp() {
       prev.map((t) => (t.id === taskId ? { ...t, status: newStatus } : t))
     );
 
-    const { error } = await supabase.from('tasks').update({
-      status: newStatus
-    }).eq('id', taskId);
-
-    if (error) console.error('Error toggling task status:', error);
+    try {
+      await apiFetch(`/api/tasks/${taskId}`, {
+        method: 'PUT',
+        body: JSON.stringify({ status: newStatus }),
+      });
+    } catch (error) {
+      console.error('Error toggling task status:', error);
+    }
   };
 
   return (
@@ -390,26 +429,44 @@ function ShareWhiteboardPage() {
         setLoading(false);
         return;
       }
-      const { data, error: shareError } = await supabase
-        .from('whiteboard_shares')
-        .select('whiteboard_id')
-        .eq('id', shareId)
-        .maybeSingle();
+      try {
+        const apiBase =
+          ((import.meta as any).env?.VITE_API_BASE_URL as string) ||
+          ((import.meta as any).env?.VITE_PUBLIC_BASE_URL as string) ||
+          window.location.origin;
 
-      if (shareError) {
+        const headers: Record<string, string> = { "Content-Type": "application/json" };
+        const apiToken = (import.meta as any).env?.VITE_API_TOKEN as string | undefined;
+        if (apiToken) headers.Authorization = `Bearer ${apiToken}`;
+
+        const res = await fetch(`${apiBase.replace(/\/$/, "")}/api/whiteboard-shares/${shareId}`, {
+          method: 'GET',
+          headers,
+          credentials: 'include',
+        });
+
+        const text = await res.text();
+        if (res.status === 401) {
+          redirectToLogin();
+          return;
+        }
+        if (!res.ok) throw new Error(text || `API error ${res.status}`);
+
+        const payload = text ? JSON.parse(text) : null;
+        const share = payload?.share;
+        if (!share) {
+          setError('Share not found.');
+          setLoading(false);
+          return;
+        }
+
+        setWhiteboardId(share.whiteboard_id);
+        setLoading(false);
+      } catch (e) {
         setError('Failed to load share.');
         setLoading(false);
         return;
       }
-
-      if (!data) {
-        setError('Share not found.');
-        setLoading(false);
-        return;
-      }
-
-      setWhiteboardId(data.whiteboard_id);
-      setLoading(false);
     };
 
     fetchShare();

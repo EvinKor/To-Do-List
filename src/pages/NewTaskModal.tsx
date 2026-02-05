@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import ReactDOM from 'react-dom';
 import { v4 as uuidv4 } from 'uuid';
-import { Task } from './hooks/types';
+import { Task } from '../hooks/types';
 
 interface NewTaskModalProps {
   isOpen: boolean;

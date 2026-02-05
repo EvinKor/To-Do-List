@@ -6,7 +6,8 @@ import { supabaseBootstrapByEmail } from "./supabase/bootstrap.js";
 import { inventoryFullSync } from "./supabase/inventorySync.js";
 import { getAppointments } from "./supabase/appointments.js";
 import { upsertInventoryMeta } from "./supabase/upsertInventory.Meta.js";
-import { upsertWhiteboardNote } from "./supabase/whiteboardNotes.js";
+import { handleWhiteboardApi } from "./supabase/whiteboard.js";
+import { handleTasksApi } from "./supabase/tasks.js";
 
 export default {
   async fetch(request, env) {
@@ -464,74 +465,30 @@ export default {
     }
 
     /* ==============================
-      API: PUT /api/whiteboard-notes/:id
+      Whiteboard API (notes/drawings/shares)
     =================================*/
-    if (
-      (url.pathname.startsWith("/api/whiteboard-notes/") ||
-        url.pathname.startsWith("/whiteboard-notes/")) &&
-      request.method === "PUT"
-    ) {
-      const token = getTokenFromRequest(request);
-      if (!token) return new Response("Unauthorized", { status: 401, headers: corsHeaders });
-    
-      const decoded = decodeAndValidateToken(token);
-      if (!decoded.ok) {
-        return new Response("Unauthorized", {
-          status: 401,
-          headers: {
-            ...(decoded.error === "expired" ? { "Set-Cookie": buildClearCookie() } : {}),
-            ...corsHeaders,
-          },
-        });
-      }
-    
-      // extract noteId from URL
-      const noteId = url.pathname.split("/").pop();
-    
-      // parse body
-      let body;
-      try {
-        body = await request.json();
-      } catch {
-        return new Response("Invalid JSON", { status: 400, headers: corsHeaders });
-      }
-    
-      // ✅ enforce user via your profile table
-      const profile = await getProfileByEmail(env, decoded.email);
-      if (!profile) return new Response("User not found", { status: 403, headers: corsHeaders });
-    
-      const row = {
-        id: noteId,
-        whiteboard_id: body.whiteboard_id,
-        user_id: profile.user_id,   // ✅ server controlled
-        type: body.type,
-        x: body.x ?? 0,
-        y: body.y ?? 0,
-        width: body.width ?? 256,
-        height: body.height ?? 256,
-        rotation: body.rotation ?? 0,
-        z_index: body.z_index ?? 1,
-        title: body.title ?? null,
-        content: body.content ?? null,
-        color: body.color ?? "yellow",
-        font_size: body.font_size ?? 16,
-        image_url: body.image_url ?? null,
-        updated_at: new Date().toISOString(),
-      };
-    
-      try {
-        const saved = await upsertWhiteboardNote(env, row);
-        return new Response(JSON.stringify({ ok: true, note: saved }), {
-          status: 200,
-          headers: { "Content-Type": "application/json", ...corsHeaders },
-        });
-      } catch (e) {
-        return new Response(JSON.stringify({ error: e.message }), {
-          status: 500,
-          headers: { "Content-Type": "application/json", ...corsHeaders },
-        });
-      }
-    }
+    const whiteboardResponse = await handleWhiteboardApi({
+      request,
+      env,
+      corsHeaders,
+      getTokenFromRequest,
+      decodeAndValidateToken,
+      getProfileByEmail,
+    });
+    if (whiteboardResponse) return whiteboardResponse;
+
+    /* ==============================
+      Tasks API
+    =================================*/
+    const tasksResponse = await handleTasksApi({
+      request,
+      env,
+      corsHeaders,
+      getTokenFromRequest,
+      decodeAndValidateToken,
+      getProfileByEmail,
+    });
+    if (tasksResponse) return tasksResponse;
 
     return new Response("SSO Gateway Active", {
       status: 200,
