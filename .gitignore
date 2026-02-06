@@ -43,3 +43,7 @@ coverage/
 *.tmp
 *.temp
 .cache/
+
+wrangler/
+cloudflare/
+wrangler.jsconc
