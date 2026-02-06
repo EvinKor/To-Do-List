@@ -1,7 +1,7 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import QRCode from 'qrcode';
 import { WhiteboardNote } from '@/src/hooks/types';
-import { redirectToLogin } from '@/src/lib/auth';
+import { apiFetch } from '@/src/lib/api';
 
 // ✅ Use a real UUID for the whiteboard too
 const WHITEBOARD_ID = 'a1111111-b222-c333-d444-e55555555555';
@@ -71,38 +71,11 @@ const Whiteboard: React.FC<WhiteboardProps> = ({
     whiteboardId ?? WHITEBOARD_ID
   );
   const canShare = allowShare !== false;
-  const apiBase =
-    ((import.meta as any).env?.VITE_API_BASE_URL as string) ||
-    ((import.meta as any).env?.VITE_PUBLIC_BASE_URL as string) ||
-    window.location.origin;
-  const apiToken = (import.meta as any).env?.VITE_API_TOKEN as string | undefined;
-
-  const apiFetch = useCallback(
+  const apiFetchFn = useCallback(
     async (path: string, options: RequestInit = {}) => {
-      const headers: Record<string, string> = {
-        "Content-Type": "application/json",
-        ...(options.headers as Record<string, string> | undefined),
-      };
-      if (apiToken) headers.Authorization = `Bearer ${apiToken}`;
-
-      const res = await fetch(`${apiBase.replace(/\/$/, "")}${path}`, {
-        ...options,
-        headers,
-        credentials: "include",
-      });
-
-      // change to login page
-      const text = await res.text();
-      if (res.status === 401) {
-        redirectToLogin();
-        return null;
-      }
-      if (!res.ok) {
-        throw new Error(text || `API error ${res.status}`);
-      }
-      return text ? JSON.parse(text) : null;
+      return await apiFetch(path, options);
     },
-    [apiBase]
+    []
   );
 
   // ✅ Prevent notes upsert before whiteboard exists (FK fix)
@@ -151,7 +124,7 @@ const Whiteboard: React.FC<WhiteboardProps> = ({
     const row = toDbRow(note);
 
       try {
-        await apiFetch(`/whiteboard-notes/${note.id}`, {
+        await apiFetchFn(`/whiteboard-notes/${note.id}`, {
           method: 'PUT',
           body: JSON.stringify(row),
         });
@@ -167,7 +140,7 @@ const Whiteboard: React.FC<WhiteboardProps> = ({
     if (!whiteboardReady) return;
 
       try {
-        await apiFetch(`/whiteboard-notes/${id}`, { method: 'DELETE' });
+        await apiFetchFn(`/whiteboard-notes/${id}`, { method: 'DELETE' });
       } catch (error) {
         console.error('Error deleting note:', error);
       }
@@ -183,7 +156,7 @@ const Whiteboard: React.FC<WhiteboardProps> = ({
     }
     if (!userId) return;
     // Fetch user's whiteboard id from API
-    apiFetch(`/whiteboards?user_id=${userId}`, { method: 'GET' })
+    apiFetchFn(`/whiteboards?user_id=${userId}`, { method: 'GET' })
       .then((result) => {
         const first = result?.boards?.[0];
         if (first?.id) setEffectiveWhiteboardId(first.id);
@@ -191,7 +164,7 @@ const Whiteboard: React.FC<WhiteboardProps> = ({
       .catch((error) => {
         console.error('Error fetching user whiteboards:', error);
       });
-  }, [whiteboardId, userId, apiFetch]);
+  }, [whiteboardId, userId, apiFetchFn]);
 
   useEffect(() => {
     const ensureWhiteboardExists = async () => {
@@ -209,7 +182,7 @@ const Whiteboard: React.FC<WhiteboardProps> = ({
 
       let board = null;
       try {
-        const result = await apiFetch(`/whiteboards/${effectiveWhiteboardId}`, {
+        const result = await apiFetchFn(`/whiteboards/${effectiveWhiteboardId}`, {
           method: 'GET',
         });
         board = result?.board ?? null;
@@ -222,7 +195,7 @@ const Whiteboard: React.FC<WhiteboardProps> = ({
         console.log('Whiteboard missing, creating...', effectiveWhiteboardId);
 
         try {
-          await apiFetch('/whiteboards', {
+          await apiFetchFn('/whiteboards', {
             method: 'POST',
             body: JSON.stringify({
               id: effectiveWhiteboardId,
@@ -243,7 +216,7 @@ const Whiteboard: React.FC<WhiteboardProps> = ({
     };
 
     ensureWhiteboardExists();
-  }, [userId, isOffline, apiFetch, effectiveWhiteboardId]);
+  }, [userId, isOffline, apiFetchFn, effectiveWhiteboardId]);
 
   // ----------------------------
   // Fetch Notes on Load
@@ -272,7 +245,7 @@ const Whiteboard: React.FC<WhiteboardProps> = ({
 
       console.log('Fetching Notes...');
       try {
-        const result = await apiFetch(`/whiteboard-notes?whiteboard_id=${effectiveWhiteboardId}`, {
+        const result = await apiFetchFn(`/whiteboard-notes?whiteboard_id=${effectiveWhiteboardId}`, {
           method: 'GET',
         });
         const data = result?.notes ?? [];
@@ -294,7 +267,7 @@ const Whiteboard: React.FC<WhiteboardProps> = ({
     };
 
     fetchNotes();
-  }, [userId, whiteboardReady, isOffline, setNotes, mapDbNote, effectiveWhiteboardId, apiFetch]);
+  }, [userId, whiteboardReady, isOffline, setNotes, mapDbNote, effectiveWhiteboardId, apiFetchFn]);
 
   // ----------------------------
   // Debounced Autosave
@@ -341,7 +314,7 @@ const Whiteboard: React.FC<WhiteboardProps> = ({
     const fetchDrawings = async () => {
       if (!userId) return;
       try {
-        const result = await apiFetch(`/whiteboard-drawings?whiteboard_id=${effectiveWhiteboardId}`, {
+        const result = await apiFetchFn(`/whiteboard-drawings?whiteboard_id=${effectiveWhiteboardId}`, {
           method: 'GET',
         });
         const data = result?.drawings ?? [];
@@ -351,7 +324,7 @@ const Whiteboard: React.FC<WhiteboardProps> = ({
       }
     };
     fetchDrawings();
-  }, [userId, apiFetch, effectiveWhiteboardId]);
+  }, [userId, apiFetchFn, effectiveWhiteboardId]);
 
   const saveDrawing = async (id: string, points: { x: number; y: number }[]) => {
     if (!userId || points.length < 2) return;
@@ -364,7 +337,7 @@ const Whiteboard: React.FC<WhiteboardProps> = ({
       color: penColor
     };
     try {
-      await apiFetch(`/whiteboard-drawings/${id}`, {
+      await apiFetchFn(`/whiteboard-drawings/${id}`, {
         method: 'PUT',
         body: JSON.stringify(newDrawing),
       });
@@ -379,7 +352,7 @@ const Whiteboard: React.FC<WhiteboardProps> = ({
 
     // DB Update
     try {
-      await apiFetch(`/whiteboard-drawings/${id}`, { method: 'DELETE' });
+      await apiFetchFn(`/whiteboard-drawings/${id}`, { method: 'DELETE' });
     } catch (error) {
       console.error('Error deleting drawing:', error);
     }
@@ -451,7 +424,7 @@ const Whiteboard: React.FC<WhiteboardProps> = ({
     setShareError(null);
     try {
       const baseUrl = (import.meta as any).env?.VITE_PUBLIC_BASE_URL || 'http://localhost:3000';
-      const existing = await apiFetch(
+      const existing = await apiFetchFn(
         `/whiteboard-shares?whiteboard_id=${effectiveWhiteboardId}`,
         { method: 'GET' }
       );
@@ -459,7 +432,7 @@ const Whiteboard: React.FC<WhiteboardProps> = ({
       let shareId = existing?.shares?.[0]?.id;
       if (!shareId) {
         shareId = crypto.randomUUID();
-        await apiFetch('/whiteboard-shares', {
+        await apiFetchFn('/whiteboard-shares', {
           method: 'POST',
           body: JSON.stringify({
             id: shareId,

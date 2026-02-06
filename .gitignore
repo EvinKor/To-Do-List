@@ -44,3 +44,10 @@ coverage/
 *.tmp
 *.temp
 .cache/
+
+wrangler/
+cloudflare/
+wrangler.jsonc
+.wrangler
+.wrangler/
+.wrangler/tmp/

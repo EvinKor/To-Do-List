@@ -3,8 +3,8 @@ import { Routes, Route, useParams } from 'react-router-dom';
 import TaskListView from './TaskListView';
 import Whiteboard from '../components/Whiteboard/Whiteboard';
 import { Task, WhiteboardNote } from '../hooks/types';
-import { supabase } from '../lib/supabase';
 import { redirectToLogin } from '../lib/auth';
+import { apiFetch } from '../lib/api';
 import { v4 as uuidv4 } from 'uuid';
 
 // Seed data to showcase the views without a backend
@@ -132,33 +132,7 @@ function MainApp() {
 
   const toggleTheme = () => setIsDarkMode((v) => !v);
 
-  const apiBase =
-    ((import.meta as any).env?.VITE_API_BASE_URL as string) ||
-    ((import.meta as any).env?.VITE_PUBLIC_BASE_URL as string) ||
-    window.location.origin;
-  const apiToken = (import.meta as any).env?.VITE_API_TOKEN as string | undefined;
-
-  const apiFetch = async (path: string, options: RequestInit = {}) => {
-    const headers: Record<string, string> = {
-      "Content-Type": "application/json",
-      ...(options.headers as Record<string, string> | undefined),
-    };
-    if (apiToken) headers.Authorization = `Bearer ${apiToken}`;
-
-    const res = await fetch(`${apiBase.replace(/\/$/, "")}${path}`, {
-      ...options,
-      headers,
-      credentials: "include",
-    });
-
-    const text = await res.text();
-    if (res.status === 401) {
-      redirectToLogin();
-      return null;
-    }
-    if (!res.ok) throw new Error(text || `API error ${res.status}`);
-    return text ? JSON.parse(text) : null;
-  };
+  // apiFetch is shared in src/lib/api.ts
 
   // Handlers moved to bottom
 
@@ -357,7 +331,13 @@ function MainApp() {
           {/* Right Actions */}
           <div className="flex items-center gap-3">
             <button
-              onClick={async () => await supabase.auth.signOut()}
+              onClick={async () => {
+                try {
+                  await apiFetch('/logout', { method: 'POST' });
+                } finally {
+                  redirectToLogin();
+                }
+              }}
               className="px-4 py-2 rounded-xl text-sm font-medium text-slate-500 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-white/5 transition-colors"
             >
               Sign Out

@@ -2,7 +2,6 @@ import React, { useState, useMemo, useEffect, useRef } from 'react';
 import confetti from 'canvas-confetti';
 import { Task } from '../hooks/types';
 import NewTaskModal from './NewTaskModal';
-import { supabase } from '../lib/supabase'; // Adjusted import
 
 interface TaskListViewProps {
     toggleTheme: () => void;
@@ -132,72 +131,6 @@ const TaskListView: React.FC<TaskListViewProps> = ({ toggleTheme, tasks, onToggl
 
     const handleDelete = async (taskId: string) => {
         await onDeleteTask(taskId); // Delete task logic
-    };
-
-    // --- Task Database Operations ---
-    const createTaskInDb = async (task: Task) => {
-        const { data, error } = await supabase
-            .from('tasks')
-            .insert({
-                id: task.id,
-                title: task.title,
-                category: task.category,
-                type: task.type,
-                color: task.color,
-                urgency: task.urgency,
-                date: task.date,
-                time: task.time,
-                duration: task.duration,
-                status: task.status,
-                user_id: userId, // Link task to logged-in user
-            })
-            .single();
-
-        if (error) {
-            console.error('Error creating task:', error);
-            return;
-        }
-
-        console.log('Task created:', data);
-    };
-
-    const updateTaskInDb = async (task: Task) => {
-        const { data, error } = await supabase
-            .from('tasks')
-            .update({
-                title: task.title,
-                category: task.category,
-                type: task.type,
-                color: task.color,
-                urgency: task.urgency,
-                date: task.date,
-                time: task.time,
-                duration: task.duration,
-                status: task.status,
-            })
-            .eq('id', task.id)
-            .single();
-
-        if (error) {
-            console.error('Error updating task:', error);
-            return;
-        }
-
-        console.log('Task updated:', data);
-    };
-
-    const deleteTaskFromDb = async (taskId: string) => {
-        const { error } = await supabase
-            .from('tasks')
-            .delete()
-            .eq('id', taskId);
-
-        if (error) {
-            console.error('Error deleting task:', error);
-            return;
-        }
-
-        console.log('Task deleted');
     };
 
     // --- DnD Handlers ---

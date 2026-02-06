@@ -1,50 +1,32 @@
 import React, { useState } from 'react';
-import { supabase } from '../../lib/supabase';
 
 interface LoginPageProps {
     onLoginSuccess: () => void;
 }
 
 export default function LoginPage({ onLoginSuccess }: LoginPageProps) {
-    const [isSignUp, setIsSignUp] = useState(false);
-    const [email, setEmail] = useState('');
-    const [password, setPassword] = useState('');
-    const [loading, setLoading] = useState(false);
+    const [token, setToken] = useState('');
     const [error, setError] = useState<string | null>(null);
     const [message, setMessage] = useState<string | null>(null);
 
-    const handleAuth = async (e: React.FormEvent) => {
+    const handleSetToken = (e: React.FormEvent) => {
         e.preventDefault();
-        setLoading(true);
         setError(null);
         setMessage(null);
 
-        try {
-            if (isSignUp) {
-                const { error } = await supabase.auth.signUp({
-                    email,
-                    password,
-                });
-                if (error) throw error;
-                setMessage('Check your email for the confirmation link!');
-            } else {
-                const { error } = await supabase.auth.signInWithPassword({
-                    email,
-                    password,
-                });
-                if (error) throw error;
-                onLoginSuccess();
-            }
-        } catch (err: any) {
-            setError(err.message || 'An error occurred');
-        } finally {
-            setLoading(false);
+        if (!token.trim()) {
+            setError('Token is required');
+            return;
         }
+
+        const secure = window.location.protocol === 'https:' ? '; Secure' : '';
+        document.cookie = `mrbur_sso=${encodeURIComponent(token.trim())}; Path=/; SameSite=Lax${secure}`;
+        setMessage('Token saved. Redirecting...');
+        onLoginSuccess();
     };
 
     return (
         <div className="min-h-screen flex items-center justify-center bg-slate-50 dark:bg-slate-900 overflow-hidden relative">
-            {/* Background Ambience */}
             <div className="absolute top-0 left-0 w-full h-full overflow-hidden pointer-events-none">
                 <div className="absolute top-[-20%] left-[-10%] w-[60%] h-[60%] bg-blue-400/20 rounded-full blur-[120px] animate-pulse"></div>
                 <div className="absolute bottom-[-20%] right-[-10%] w-[60%] h-[60%] bg-purple-400/20 rounded-full blur-[120px] animate-pulse delay-700"></div>
@@ -55,11 +37,9 @@ export default function LoginPage({ onLoginSuccess }: LoginPageProps) {
                     <div className="size-16 rounded-2xl bg-gradient-to-br from-blue-500 to-purple-600 flex items-center justify-center shadow-lg mb-4">
                         <span className="text-3xl font-bold text-white">P</span>
                     </div>
-                    <h1 className="text-3xl font-bold text-slate-900 dark:text-white mb-2">
-                        {isSignUp ? 'Create Account' : 'Welcome Back'}
-                    </h1>
+                    <h1 className="text-3xl font-bold text-slate-900 dark:text-white mb-2">Set Token</h1>
                     <p className="text-slate-500 dark:text-slate-400 text-center">
-                        {isSignUp ? 'Sign up to start organizing' : 'Sign in to access your dashboard'}
+                        Paste your token to continue.
                     </p>
                 </div>
 
@@ -75,56 +55,25 @@ export default function LoginPage({ onLoginSuccess }: LoginPageProps) {
                     </div>
                 )}
 
-                <form onSubmit={handleAuth} className="space-y-5">
+                <form onSubmit={handleSetToken} className="space-y-5">
                     <div>
-                        <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1.5 ml-1">Email</label>
-                        <input
-                            type="email"
+                        <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1.5 ml-1">Token</label>
+                        <textarea
                             required
-                            value={email}
-                            onChange={(e) => setEmail(e.target.value)}
-                            className="w-full px-5 py-3 rounded-xl bg-white dark:bg-slate-900/50 border border-slate-200 dark:border-slate-700 focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500 outline-none transition-all dark:text-white"
-                            placeholder="name@company.com"
-                        />
-                    </div>
-
-                    <div>
-                        <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1.5 ml-1">Password</label>
-                        <input
-                            type="password"
-                            required
-                            value={password}
-                            onChange={(e) => setPassword(e.target.value)}
-                            className="w-full px-5 py-3 rounded-xl bg-white dark:bg-slate-900/50 border border-slate-200 dark:border-slate-700 focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500 outline-none transition-all dark:text-white"
-                            placeholder="••••••••"
+                            value={token}
+                            onChange={(e) => setToken(e.target.value)}
+                            className="w-full px-4 py-3 rounded-xl bg-white dark:bg-slate-900/50 border border-slate-200 dark:border-slate-700 focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500 outline-none transition-all dark:text-white min-h-[120px]"
+                            placeholder="Paste token here"
                         />
                     </div>
 
                     <button
                         type="submit"
-                        disabled={loading}
-                        className="w-full py-3.5 rounded-xl bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700 text-white font-bold shadow-lg hover:shadow-xl hover:scale-[1.02] active:scale-[0.98] transition-all disabled:opacity-70 disabled:cursor-not-allowed flex items-center justify-center"
+                        className="w-full py-3.5 rounded-xl bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700 text-white font-bold shadow-lg hover:shadow-xl hover:scale-[1.02] active:scale-[0.98] transition-all"
                     >
-                        {loading ? (
-                            <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-                        ) : (
-                            isSignUp ? 'Sign Up' : 'Sign In'
-                        )}
+                        Save Token
                     </button>
                 </form>
-
-                <div className="mt-8 text-center">
-                    <button
-                        onClick={() => {
-                            setIsSignUp(!isSignUp);
-                            setError(null);
-                            setMessage(null);
-                        }}
-                        className="text-sm font-medium text-slate-500 dark:text-slate-400 hover:text-blue-600 dark:hover:text-blue-400 transition-colors"
-                    >
-                        {isSignUp ? 'Already have an account? Sign In' : "Don't have an account? Sign Up"}
-                    </button>
-                </div>
             </div>
         </div>
     );

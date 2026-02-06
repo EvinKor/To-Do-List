@@ -1,6 +1,5 @@
 import { useEffect, useState } from 'react';
-import { supabase } from '@/src/lib/supabase';
-import { APP_USER_ID } from '@/src/config/appUser';
+import { apiFetch } from '@/src/lib/api';
 import { WhiteboardNote } from './types';
 
 
@@ -11,15 +10,11 @@ export function useWhiteboard(whiteboardId: string) {
   // Load notes
   useEffect(() => {
     const loadNotes = async () => {
-      const { data, error } = await supabase
-        .from('whiteboard_notes')
-        .select('*')
-        .eq('whiteboard_id', whiteboardId)
-        .eq('user_id', APP_USER_ID);
-
-      if (!error && data) {
-        setNotes(data);
-      }
+      const result = await apiFetch(`/whiteboard-notes?whiteboard_id=${whiteboardId}`, {
+        method: 'GET',
+      });
+      const data = result?.notes ?? [];
+      setNotes(data);
       setLoading(false);
     };
 
@@ -28,25 +23,28 @@ export function useWhiteboard(whiteboardId: string) {
 
   // Save notes (manual for now)
   const saveNotes = async (notesToSave: WhiteboardNote[]) => {
-    await supabase.from('whiteboard_notes').upsert(
-      notesToSave.map(n => ({
-        id: n.id,
-        whiteboard_id: whiteboardId,
-        user_id: APP_USER_ID,
-        type: n.type,
-        x: n.x,
-        y: n.y,
-        width: n.width,
-        height: n.height,
-        rotation: n.rotation,
-        z_index: n.zIndex,
-        title: n.title,
-        content: n.content,
-        color: n.color,
-        font_size: n.fontSize,
-        image_url: n.imageUrl,
-      })),
-      { onConflict: 'id' }
+    await Promise.all(
+      notesToSave.map((n) =>
+        apiFetch(`/whiteboard-notes/${n.id}`, {
+          method: 'PUT',
+          body: JSON.stringify({
+            id: n.id,
+            whiteboard_id: whiteboardId,
+            type: n.type,
+            x: n.x,
+            y: n.y,
+            width: n.width,
+            height: n.height,
+            rotation: n.rotation,
+            z_index: n.zIndex,
+            title: n.title,
+            content: n.content,
+            color: n.color,
+            font_size: n.fontSize,
+            image_url: n.imageUrl,
+          }),
+        })
+      )
     );
   };
 
