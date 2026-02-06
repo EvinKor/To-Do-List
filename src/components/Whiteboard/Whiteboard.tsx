@@ -423,7 +423,7 @@ const Whiteboard: React.FC<WhiteboardProps> = ({
     setShareLoading(true);
     setShareError(null);
     try {
-      const baseUrl = (import.meta as any).env?.VITE_PUBLIC_BASE_URL || 'http://localhost:3000';
+      const baseUrl = (import.meta as any).env?.VITE_PUBLIC_BASE_URL || 'http://172.26.144.1:3000/To-Do-List/';
       const existing = await apiFetchFn(
         `/whiteboard-shares?whiteboard_id=${effectiveWhiteboardId}`,
         { method: 'GET' }
