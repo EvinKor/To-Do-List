@@ -6,6 +6,8 @@ import { Task, WhiteboardNote } from '../hooks/types';
 import { redirectToLogin } from '../lib/auth';
 import { apiFetch } from '../lib/api';
 import { v4 as uuidv4 } from 'uuid';
+import { APP_USER_ID } from '../config/appUser';
+import ShareWhiteboardPhonePage from './ShareWhiteboardPhonePage';
 
 // Seed data to showcase the views without a backend
 const seedTasks: Task[] = [
@@ -89,6 +91,7 @@ function MainApp() {
   /* const [notes, setNotes] = useState<WhiteboardNote[]>(seedNotes); */
   const [notes, setNotes] = useState<WhiteboardNote[]>([]);
   const [activeView, setActiveView] = useState<View>('whiteboard');
+  const [isMobileView, setIsMobileView] = useState(false);
 
   // Keep the document class in sync so Tailwind dark styles work
   // --- Auth State ---
@@ -100,10 +103,10 @@ function MainApp() {
       try {
         const result = await apiFetch('/verify-token', { method: 'GET' });
         const uid = result?.user?.profiles?.user?.user_id || null;
-        setUserId(uid);
+        setUserId(uid || APP_USER_ID);
       } catch (error) {
         console.error('Failed to load user profile:', error);
-        setUserId(null);
+        setUserId(APP_USER_ID);
       } finally {
         setLoading(false);
       }
@@ -131,6 +134,14 @@ function MainApp() {
   }, [isDarkMode]);
 
   const toggleTheme = () => setIsDarkMode((v) => !v);
+
+  useEffect(() => {
+    const mq = window.matchMedia('(max-width: 768px)');
+    const update = () => setIsMobileView(mq.matches);
+    update();
+    mq.addEventListener('change', update);
+    return () => mq.removeEventListener('change', update);
+  }, []);
 
   // apiFetch is shared in src/lib/api.ts
 
@@ -187,6 +198,22 @@ function MainApp() {
     return (
       <div className="h-screen flex items-center justify-center bg-slate-50 dark:bg-slate-900">
         <div className="text-sm text-red-500">VITE_APP_USER_ID is not set.</div>
+      </div>
+    );
+  }
+
+  if (isMobileView) {
+    return (
+      <div className="min-h-[100dvh] h-[100dvh] overflow-hidden bg-background-light dark:bg-background-dark text-slate-900 dark:text-slate-50">
+        <Whiteboard
+          toggleTheme={toggleTheme}
+          isDarkMode={isDarkMode}
+          notes={notes}
+          setNotes={setNotes}
+          userId={userId}
+          fitToViewport
+          enableRealtime
+        />
       </div>
     );
   }
@@ -376,6 +403,7 @@ function MainApp() {
             notes={notes}
             setNotes={setNotes}
             userId={userId}
+            enableRealtime
           />
         )}
       </main>
@@ -410,29 +438,7 @@ function ShareWhiteboardPage() {
         return;
       }
       try {
-        const apiBase =
-          ((import.meta as any).env?.VITE_API_BASE_URL as string) ||
-          ((import.meta as any).env?.VITE_PUBLIC_BASE_URL as string) ||
-          window.location.origin;
-
-        const headers: Record<string, string> = { "Content-Type": "application/json" };
-        const apiToken = (import.meta as any).env?.VITE_API_TOKEN as string | undefined;
-        if (apiToken) headers.Authorization = `Bearer ${apiToken}`;
-
-        const res = await fetch(`${apiBase.replace(/\/$/, "")}/whiteboard-shares/${shareId}`, {
-          method: 'GET',
-          headers,
-          credentials: 'include',
-        });
-
-        const text = await res.text();
-        if (res.status === 401) {
-          redirectToLogin();
-          return;
-        }
-        if (!res.ok) throw new Error(text || `API error ${res.status}`);
-
-        const payload = text ? JSON.parse(text) : null;
+        const payload = await apiFetch(`/whiteboard-shares/${shareId}`, { method: 'GET' });
         const share = payload?.share;
         if (!share) {
           setError('Share not found.');
@@ -472,17 +478,19 @@ function ShareWhiteboardPage() {
   }
 
   return (
-    <div className="h-screen flex flex-col bg-background-light dark:bg-background-dark text-slate-900 dark:text-slate-50">
+    <div className="min-h-[100dvh] flex flex-col bg-background-light dark:bg-background-dark text-slate-900 dark:text-slate-50">
       <main className="flex-1 w-full flex flex-col">
-        <Whiteboard
-          toggleTheme={() => {}}
-          isDarkMode={false}
-          notes={notes}
-          setNotes={setNotes}
-          userId={guestId}
-          whiteboardId={whiteboardId}
-          allowShare={false}
-        />
+      <Whiteboard
+        toggleTheme={() => {}}
+        isDarkMode={false}
+        notes={notes}
+        setNotes={setNotes}
+        userId={guestId}
+        whiteboardId={whiteboardId}
+        allowShare={false}
+        fitToViewport
+        enableRealtime
+      />
       </main>
     </div>
   );
@@ -491,6 +499,7 @@ function ShareWhiteboardPage() {
 export default function App() {
   return (
     <Routes>
+      <Route path="/share/:shareId/phone" element={<ShareWhiteboardPhonePage />} />
       <Route path="/share/:shareId" element={<ShareWhiteboardPage />} />
       <Route path="/*" element={<MainApp />} />
     </Routes>

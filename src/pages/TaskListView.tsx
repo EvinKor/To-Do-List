@@ -36,6 +36,9 @@ const TaskListView: React.FC<TaskListViewProps> = ({ toggleTheme, tasks, onToggl
         timeframe: 'all',
     });
     const filterRef = useRef<HTMLDivElement>(null);
+    const filterButtonRef = useRef<HTMLButtonElement>(null);
+    const scrollContainerRef = useRef<HTMLDivElement>(null);
+    const [filterPosition, setFilterPosition] = useState<{ top: number; right: number } | null>(null);
 
     useEffect(() => {
         const updateColumns = () => {
@@ -61,6 +64,29 @@ const TaskListView: React.FC<TaskListViewProps> = ({ toggleTheme, tasks, onToggl
         }
         return () => {
             document.removeEventListener('mousedown', handleClickOutside);
+        };
+    }, [isFilterOpen]);
+
+    useEffect(() => {
+        if (!isFilterOpen) return;
+
+        const updatePosition = () => {
+            const rect = filterButtonRef.current?.getBoundingClientRect();
+            if (!rect) return;
+            const top = rect.bottom + 8;
+            const right = Math.max(window.innerWidth - rect.right, 8);
+            setFilterPosition({ top, right });
+        };
+
+        updatePosition();
+        window.addEventListener('resize', updatePosition);
+        window.addEventListener('scroll', updatePosition, true);
+        scrollContainerRef.current?.addEventListener('scroll', updatePosition, { passive: true });
+
+        return () => {
+            window.removeEventListener('resize', updatePosition);
+            window.removeEventListener('scroll', updatePosition, true);
+            scrollContainerRef.current?.removeEventListener('scroll', updatePosition);
         };
     }, [isFilterOpen]);
 
@@ -430,7 +456,7 @@ const TaskListView: React.FC<TaskListViewProps> = ({ toggleTheme, tasks, onToggl
                 onDelete={onDeleteTask}
             />
             <div className="flex-1 flex flex-col relative overflow-hidden bg-slate-50/50 dark:bg-transparent">
-                <div className="flex-1 overflow-y-auto custom-scrollbar relative z-10">
+                <div ref={scrollContainerRef} className="flex-1 overflow-y-auto no-scrollbar custom-scrollbar relative z-10">
                     <div className="px-6 pt-5 pb-0 flex flex-col sm:flex-row items-center justify-end gap-4">
                         <div className="flex items-center gap-4">
                             <button
@@ -443,6 +469,7 @@ const TaskListView: React.FC<TaskListViewProps> = ({ toggleTheme, tasks, onToggl
 
                             <div className="relative" ref={filterRef}>
                                 <button
+                                    ref={filterButtonRef}
                                     onClick={() => setIsFilterOpen(!isFilterOpen)}
                                     className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-bold border transition-all ${isFilterOpen || activeFilterCount > 0
                                         ? 'bg-primary text-white border-primary'
@@ -459,7 +486,19 @@ const TaskListView: React.FC<TaskListViewProps> = ({ toggleTheme, tasks, onToggl
                                 </button>
 
                                 {isFilterOpen && (
-                                    <div className="absolute right-0 top-full mt-2 w-72 bg-white dark:bg-[#1E1E1E] rounded-xl shadow-xl border border-slate-100 dark:border-slate-700 p-5 z-50 animate-in fade-in zoom-in-95 duration-100">
+                                    <div
+                                        className="fixed mt-2 w-72 bg-white dark:bg-[#1E1E1E] rounded-xl shadow-xl border border-slate-100 dark:border-slate-700 p-5 z-50 animate-in fade-in zoom-in-95 duration-100 overscroll-contain"
+                                        style={filterPosition ? { top: filterPosition.top, right: filterPosition.right } : undefined}
+                                        onWheel={(e) => {
+                                            e.preventDefault();
+                                            e.stopPropagation();
+                                        }}
+                                        onTouchMove={(e) => {
+                                            e.preventDefault();
+                                            e.stopPropagation();
+                                        }}
+                                        onTouchStart={(e) => e.stopPropagation()}
+                                    >
                                         <div className="flex justify-between items-center mb-4">
                                             <h3 className="font-bold text-slate-900 dark:text-white">Filters</h3>
                                             {activeFilterCount > 0 && (

@@ -28,4 +28,7 @@ export interface WhiteboardNote {
   zIndex: number;
   fontSize: number;
   createdAt?: number;
+  updatedAt?: string;
+  status?: 'grabbing' | 'drawing' | null;
+  freshness?: 'new' | 'old' | null;
 }
